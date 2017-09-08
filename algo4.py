@@ -21,11 +21,11 @@ from peakdetect import peakdetect
 #Auxillary functions ##########################################################
 def sim_measure(vec1, vec2, i, j):
     corr = pow(sum(pow((vec1 - vec2), 2)), 0.5)/ len(vec1)
-#    plt.plot(vec1)
-#    plt.plot(vec2)
-#    plt.legend(['current', 'prev'])
-#    plt.savefig(stem + 'alignments/two_hist_' + str(i) + '_' + str(j) + '_' + str(corr) + '.jpg')
-#    plt.close()
+    plt.plot(vec1)
+    plt.plot(vec2)
+    plt.legend(['current', 'prev'])
+    plt.savefig(stem + 'alignments/two_hist_' + str(i) + '_' + str(j) + '_' + str(corr) + '.jpg')
+    plt.close()
     return corr
 
 def grouper(data):
@@ -46,18 +46,46 @@ video_name = 'BB_NS_WB.MOV'
 video_link = 'https://drive.google.com/open?id=0B8EK0LxdsI4qdjJhR0NGaUt1eXc'
 stem = video_name.split('.')[0] + '/'
 folder1 = stem + 'opt_flow/'
-folder2 = stem + 'back_sub/'
+folder2 = stem + 'new_backsub/'
 graph_dir = 'graphs/'
 hist_length = 1920
-union_length = int(3e5)
+union_length = int(1.5e5)
+bs_N = 10
+bs_thresh = 30
 N = 5
 w = 100
-intensity_thresh = 25
+intensity_thresh = 30
 smooth_window = 5
 lookahead = 5
 delta = 5
 ###############################################################################
 
+#Part 0: Background subtraction ###############################################
+bkg_im = cv2.imread(stem + 'frames/frame0.jpg', 0).astype(float)
+[m,n] = bkg_im.shape
+
+for i in range(1,bs_N):
+    bkg_im += cv2.imread(stem + 'frames/frame' + str(i) + '.jpg', 0).astype(float)
+    
+bkg_im /= bs_N
+#plt.imshow(bkg_im.astype(np.uint8))
+
+num_files = 0
+for fname in glob.glob(stem + 'frames/*.jpg'):
+    num_files += 1
+
+for i in tqdm(range(bs_N, num_files)):
+    diff = np.abs(bkg_im - \
+                     cv2.imread(stem + 'frames/frame' + str(i) + '.jpg', 0))
+    blur = cv2.GaussianBlur(diff.astype(np.uint8),(11,11),0)
+    th1 = (blur > bs_thresh) * 255
+    #th2 = np.max(th1, 2)
+    #th = cv2.adaptiveThreshold(diff.astype(np.uint8),255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,\
+    #        cv2.THRESH_BINARY,11,2)
+    #ret,th = cv2.threshold(blur,0,255,cv2.THRESH_BINARY+cv2.THRESH_OTSU)
+    cv2.imwrite(folder2 + 'frame' + str(i) + '.jpg', th1)
+
+###############################################################################
 
 #Part 1: Find horizontal boundaries ###########################################
 start_time = time.time()
@@ -199,8 +227,8 @@ for i in tqdm.tqdm(range(1,len(fnums))):
     hist_union[start[-1]:end[-1]] += curr_hist
     hist_union[start[-1]:end[-2]] /= 2
 
-#    if i == N:
-#        break
+    if i == N:
+        break
 
 str_version = 'N-{}_w-{}_it-{}_st-{}_sw-{}_la-{}_d-{}'\
                  .format(N,w,intensity_thresh,shift_thresh,smooth_window, lookahead, delta)
@@ -227,7 +255,7 @@ yn = np.insert(yn, len(yn), 0)
 initial_pred_gaps = pred_gaps
 #Finding missed out gaps
 true_lengths = gnd_truth['Train lengths']
-thresh = 1.5 * max(true_lengths)
+thresh = 1.1 * max(true_lengths)
 #thresh = 1920
 temp = []
 
@@ -259,7 +287,7 @@ for i in range(len(temp)):
     final_yn = []
     j = 1
     while j < len(group_cents):
-        if group_cents[j] - final_mins[-1] > 0.8 * min(true_lengths): #750
+        if group_cents[j] - final_mins[-1] > 0.9 * min(true_lengths): #750
             final_mins.append(group_cents[j])
             final_abs_mins.append(temp_start[i] + group_cents[j])
             final_yn.append(smooth_union[final_abs_mins[-1]])
@@ -278,7 +306,7 @@ final_pred_gaps = [pred_gaps[0]]
 final_yn = [yn[0]]
 i = 1
 while i < len(pred_gaps):
-    if pred_gaps[i] - final_pred_gaps[-1] > min(true_lengths): #750
+    if pred_gaps[i] - final_pred_gaps[-1] > 0.9 * min(true_lengths): #750
         final_pred_gaps.append(pred_gaps[i])
         final_yn.append(yn[i])
         i = i+1
@@ -334,7 +362,7 @@ elif direc.startswith('R'):
         for j in range(len(end)):
             if end[j] > pred_gaps[i]:
                 req_frames.append(fnums[j])
-                req_end.append(1920 - (end[j] - pred_gaps[i]))
+                req_end.append(n - (end[j] - pred_gaps[i]))
                 car_lengths.append(pred_gaps[i] - pred_gaps[i-1])
                 req_start.append(req_end[-1] - car_lengths[-1])
                 break
@@ -357,7 +385,7 @@ error_2 = []
 
 start_time = time.time()
 plt.figure(figsize=(20,4))
-plt.plot(hist_union)
+plt.plot(smooth_union)
 plt.scatter(pred_gaps, yn, color = 'red')
 
 #for i,v in gnd_truth.iterrows():
